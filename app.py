@@ -133,7 +133,7 @@ def get_bus_data():
                         if not arrmsg1: continue
                         
                         bus_seconds, stations_left = parse_arrmsg(arrmsg1)
-                        if bus_seconds < 9000:
+                        if bus_seconds < 10000:
                             status_type, msg, action_txt, priority = calculate_action(bus_seconds, distance)
                             direction = "석계역 방면" if arsId == "11285" else "광운대역 방면"
                             mins, secs = divmod(bus_seconds, 60)
