@@ -26,43 +26,56 @@ STATION_NAMES = {"11285": "정문 앞", "11279": "광운대역"}
 
 STATION_ID_CACHE = {}
 
-def parse_arrmsg(time_data):
+def parse_bus_time(bus):
+    """
+    버스 데이터 덩어리를 통째로 받아서, 
+    어디에 숨어있든 도착 시간(초)을 무조건 찾아내는 궁극의 번역기
+    """
     try:
-        # 무조건 문자열로 변환해서 오디세이 포장지 부수기
-        full_str = str(time_data).strip()
-        
-        if not full_str or full_str in ["{}", "None", "0", "-1"]: return 9999, "정보 없음"
-        if "운행종료" in full_str or "출발대기" in full_str: return 9999, "종료/대기"
-        if "곧 도착" in full_str or "운행중" in full_str: return 60, "곧 도착"
-        
-        minutes, seconds = 0, 0
-        stations_left = ""
-        
-        # 1. 텍스트 안에 '분', '초', '번째'가 예쁘게 있는 경우
-        m_match = re.search(r'(\d+)분', full_str)
-        s_match = re.search(r'(\d+)초', full_str)
-        st_match = re.search(r'(\d+)번째', full_str)
-        
-        if st_match:
-            stations_left = f"{st_match.group(1)}번째 전"
+        # 1. ODsay가 아주 친절하게 'traTime1(초 단위)'를 따로 준 경우 (1순위)
+        if bus.get("traTime1"):
+            sec = int(bus["traTime1"])
+            if sec > 0:
+                # 몇 번째 전인지는 arrmsg1에서 슬쩍 가져옵니다
+                arrmsg1 = str(bus.get("arrmsg1", ""))
+                st_match = re.search(r'(\d+)번째', arrmsg1)
+                stations_left = f"{st_match.group(1)}번째 전" if st_match else "계산됨"
+                return sec, stations_left
+                
+        # 2. ODsay가 'predictTime1(분 단위)'를 준 경우 (2순위)
+        if bus.get("predictTime1"):
+            mins = int(bus["predictTime1"])
+            if mins > 0:
+                arrmsg1 = str(bus.get("arrmsg1", ""))
+                st_match = re.search(r'(\d+)번째', arrmsg1)
+                stations_left = f"{st_match.group(1)}번째 전" if st_match else "계산됨"
+                return mins * 60, stations_left
+
+        # 3. arrmsg1 텍스트(예: "5분 30초 후")를 직접 해독해야 하는 경우 (3순위)
+        arrmsg1 = bus.get("arrmsg1")
+        if arrmsg1:
+            # 만약 딕셔너리 포장지면 알맹이(#text)만 쏙 빼냅니다
+            if isinstance(arrmsg1, dict):
+                arrmsg1 = arrmsg1.get("#text") or str(arrmsg1)
+                
+            full_str = str(arrmsg1).strip()
             
-        if m_match or s_match:
-            if m_match: minutes = int(m_match.group(1))
-            if s_match: seconds = int(s_match.group(1))
-            return (minutes * 60) + seconds, stations_left
+            if "종료" in full_str or "대기" in full_str: return 9999, "종료/대기"
+            if "곧 도착" in full_str or "운행중" in full_str: return 60, "곧 도착"
             
-        # 2. 🚨 핵심: 딕셔너리 포장지 안에 숨겨진 'traTime1'(초 단위 시간) 찾아내기!
-        tra_match = re.search(r"['\"]traTime1?['\"]\s*:\s*['\"]?(\d+)['\"]?", full_str)
-        if tra_match:
-            sec = int(tra_match.group(1))
-            if sec > 0: return sec, stations_left or "계산됨"
+            m_match = re.search(r'(\d+)분', full_str)
+            s_match = re.search(r'(\d+)초', full_str)
+            st_match = re.search(r'(\d+)번째', full_str)
             
-        # 3. 숫자만 덩그러니 있을 경우
-        if full_str.isdigit():
-            return int(full_str), "초 (추정)"
+            stations_left = f"{st_match.group(1)}번째 전" if st_match else ""
             
-        # 진짜 아무런 시간 정보가 없으면 정보없음 처리
-        return 9999, f"[정보 없음]"
+            if m_match or s_match:
+                minutes = int(m_match.group(1)) if m_match else 0
+                seconds = int(s_match.group(1)) if s_match else 0
+                return (minutes * 60) + seconds, stations_left
+
+        # 위 3가지 모두 실패했다면? -> 현재 이 노선에 오고 있는 버스가 없음 (유령 버스)
+        return 9999, "정보 없음"
         
     except Exception as e:
         return 9999, "분석 에러"
@@ -134,12 +147,11 @@ def get_bus_data():
                 for bus in res["result"]["real"]:
                     rtNm = str(bus.get("routeNm") or bus.get("routeName"))
                     if any(b in rtNm for b in ['261', '1144', '1137', '163']):
-                        arrmsg1 = bus.get("arrmsg1") or bus.get("arrival1")
-                        if not arrmsg1: continue
+                        # 🚨 arrmsg1 문자열 대신 bus 덩어리를 통째로 넘겨서 분석합니다!
+                        bus_seconds, stations_left = parse_bus_time(bus)
                         
-                        bus_seconds, stations_left = parse_arrmsg(arrmsg1)
-                        # 🚨 필터망을 10000초로 넓혀서 숨겨진 버스들을 건져 올립니다!
-                        if bus_seconds < 10000:
+                        # 🚨 9999초(166분 유령 버스)를 다시 완벽하게 숨기기 위해 필터를 9000으로 원상복구했습니다!
+                        if bus_seconds < 9000:
                             status_type, msg, action_txt, priority = calculate_action(bus_seconds, distance)
                             direction = "석계역 방면" if arsId == "11285" else "광운대역 방면"
                             mins, secs = divmod(bus_seconds, 60)
