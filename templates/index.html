@@ -120,7 +120,7 @@
             <div class="data-box"><h3>🕒 버스 도착 시간</h3><p id="main-time">-</p></div>
             <div class="data-box"><h3>👟 추천 행동</h3><p id="main-action">-</p></div>
         </div>
-        <div class="action-footer"><span id="main-submsg">특정 노선 필터링이 적용되었습니다.</span><span>☆</span></div>
+        <div class="action-footer"><span id="main-submsg">지형적 패널티 및 노선 필터링이 적용되었습니다.</span><span>☆</span></div>
     </div>
 
     <div class="section-title">5. 실시간 정보 갱신</div>
@@ -141,7 +141,7 @@
 <script>
     let currentBuilding = 'bima';
     let currentDirection = '11285'; 
-    let currentBus = 'all'; // 전체(가장 빠른 버스) 또는 특정 노선
+    let currentBus = 'all'; 
     let refreshSeconds = 60; 
     let timerInterval = null;
     let cachedBusData = null;
@@ -151,12 +151,10 @@
         return Math.floor(seconds / 60) + "분";
     }
 
-    // 방향에 따라 버스 버튼을 동적으로 그려주는 함수
     function updateBusButtons() {
         const group = document.getElementById('bus-group');
         let buses = currentDirection === '11285' ? ['261', '1137', '163'] : ['163', '1144', '261'];
         
-        // 현재 선택된 버스가 바뀐 정류장에 안 서는 버스라면 'all'로 리셋
         if (currentBus !== 'all' && !buses.includes(currentBus)) {
             currentBus = 'all';
         }
@@ -178,6 +176,7 @@
                 document.getElementById('progress-bar').style.width = `${(refreshSeconds / 60) * 100}%`;
                 
                 if(cachedBusData && cachedBusData.status === "success" && cachedBusData.best_bus) {
+                    // 0초 미만으로 떨어지지 않게 방어 로직 적용
                     if(cachedBusData.best_bus.seconds > 0) cachedBusData.best_bus.seconds--;
                     document.getElementById('main-time').innerText = formatMinutes(cachedBusData.best_bus.seconds);
                     
@@ -200,7 +199,6 @@
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('big-timer').innerText = '00:60';
         
-        // URL에 bus 파라미터가 추가되었습니다!
         fetch(`/api/bus?start=${currentBuilding}&dir=${currentDirection}&bus=${currentBus}`)
             .then(res => res.json())
             .then(data => {
@@ -255,17 +253,17 @@
         document.querySelectorAll('#dir-' + dir).forEach(el => el.classList.add('active'));
         document.querySelectorAll('.building-card[id^="dir-"]').forEach(el => { if(el.id !== 'dir-' + dir) el.classList.remove('active'); });
         currentDirection = dir;
-        updateBusButtons(); // 정류장이 바뀌면 노선 버튼도 갱신
+        updateBusButtons(); 
         fetchData();
     }
 
     function selectBus(busNum) {
         currentBus = busNum;
-        updateBusButtons(); // 클릭 시 시각적 활성화 변경
+        updateBusButtons(); 
         fetchData();
     }
 
-    updateBusButtons(); // 초기 노선 버튼 렌더링
+    updateBusButtons(); 
     fetchData();
     startTimer();
 </script>
