@@ -11,15 +11,25 @@ CORS(app)
 
 ODSAY_API_KEY = "xTses587ntx0ITz4NXkSPbtckAnLk+y5ikHjr+FdoQU"
 
+# 물리적 거리 테이블 (m)
 DISTANCES = {
     "bima": {"11285": 150, "11279": 500},     
     "chambit": {"11285": 500, "11279": 850},  
     "library": {"11285": 250, "11279": 600}   
 }
+
+# 🚨 현실 고증 3: 지형/신호등 패널티 타임 (초) 추가
+# 단순 물리적 거리 외에 횡단보도, 언덕 등을 고려한 추가 지연 시간
+TOPOGRAPHY_PENALTY = {
+    "bima_11279": 120,    # 비마관 -> 광운대역 (횡단보도 2개 대기)
+    "chambit_11279": 150, # 참빛관 -> 광운대역 (언덕길 + 횡단보도)
+    "chambit_11285": 60,  # 참빛관 -> 정문 (약간의 내리막 및 횡단보도)
+    "library_11285": 30,  # 도서관 -> 정문 (비교적 평탄)
+}
+
 LOC_NAMES = {"bima": "비마관", "chambit": "참빛관", "library": "중앙도서관"}
 STATION_NAMES = {"11285": "정문 앞 정류장", "11279": "광운대역 정류장"}
 STATION_ID_CACHE = {}
-
 MOCK_SCHEDULE = {}
 
 def parse_bus_time(bus):
@@ -27,12 +37,10 @@ def parse_bus_time(bus):
         bus_str = str(bus)
         m_match = re.search(r'(\d+)분', bus_str)
         s_match = re.search(r'(\d+)초', bus_str)
-        
         if m_match or s_match:
             minutes = int(m_match.group(1)) if m_match else 0
             seconds = int(s_match.group(1)) if s_match else 0
             return (minutes * 60) + seconds
-            
         tra_match = re.search(r"['\"](?:traTime1|predictTime1|time1)['\"]\s*:\s*['\"]?(\d+)['\"]?", bus_str)
         if tra_match:
             val = int(tra_match.group(1))
@@ -41,21 +49,25 @@ def parse_bus_time(bus):
     except:
         return 9999
 
-def calculate_action(bus_seconds, distance):
+def calculate_action(bus_seconds, distance, penalty):
     walk_speed = 1.27; run_speed = 4.0; buffer_time = 30  
     
-    walk_time_sec = (distance / walk_speed) + buffer_time
-    run_time_sec = (distance / run_speed) + buffer_time
+    # 지형 패널티가 합산된 진짜 도보 소요 시간
+    walk_time_sec = (distance / walk_speed) + buffer_time + penalty
+    run_time_sec = (distance / run_speed) + buffer_time + penalty
     
     walk_mins = math.ceil(walk_time_sec / 60)
-    spare_sec = bus_seconds - walk_time_sec
+    
+    # 이미 버스가 도착해서 대기 중(마이너스 시간)이라면 0으로 보정
+    display_sec = max(0, bus_seconds)
+    spare_sec = display_sec - walk_time_sec
 
     if spare_sec >= 60: 
         spare_mins = int(spare_sec // 60)
-        return "walk", f"이동에 {walk_mins}분 소요되며, {spare_mins}분 정도 더 여유가 있어요!", "걷기", 1
+        return "walk", f"이동에 {walk_mins}분(신호대기 포함) 소요. {spare_mins}분 더 여유가 있어요!", "걷기", 1
     elif spare_sec >= 0:
         return "walk", f"이동에 {walk_mins}분 소요됩니다. 지금 출발해야 안전하게 타요!", "빠른 걸음", 1
-    elif bus_seconds >= run_time_sec: 
+    elif display_sec >= run_time_sec: 
         return "run", f"거리가 멉니다({distance}m). 지금 당장 뛰어야 탈 수 있어요!", "뛰기", 2
     else: 
         return "giveup", f"이동시간({walk_mins}분) 고려 시 뛰어도 늦습니다. 포기하세요.", "포기", 3
@@ -86,6 +98,10 @@ def get_bus_data():
     target_station_name = STATION_NAMES.get(target_dir, "정문 앞 정류장")
     distance = DISTANCES[start_loc][target_dir] 
     
+    # 건물-정류장 조합에 따른 패널티 산출 (없으면 기본 30초)
+    route_key = f"{start_loc}_{target_dir}"
+    penalty = TOPOGRAPHY_PENALTY.get(route_key, 30)
+    
     current_time = int(time.time())
     all_buses = []
     
@@ -97,8 +113,16 @@ def get_bus_data():
         if b_num not in MOCK_SCHEDULE[target_dir]:
             MOCK_SCHEDULE[target_dir][b_num] = []
 
-        MOCK_SCHEDULE[target_dir][b_num] = [t for t in MOCK_SCHEDULE[target_dir][b_num] if t > current_time - 10]
+        # 🚨 현실 고증 2: 도착(0초) 후 90초 동안은 리스트에서 지우지 않음 ('곧 도착'으로 정차 유지)
+        MOCK_SCHEDULE[target_dir][b_num] = [t for t in MOCK_SCHEDULE[target_dir][b_num] if t > current_time - 90]
 
+        # 🚨 현실 고증 1: 돌발 교통체증 Jitter 발생 (20% 확률로 도착 예정 시간 10~20초 추가 지연)
+        for i in range(len(MOCK_SCHEDULE[target_dir][b_num])):
+            if MOCK_SCHEDULE[target_dir][b_num][i] > current_time: 
+                if random.random() < 0.20:
+                    MOCK_SCHEDULE[target_dir][b_num][i] += random.randint(10, 20)
+
+        # 배차 충전
         while len(MOCK_SCHEDULE[target_dir][b_num]) < 2:
             if MOCK_SCHEDULE[target_dir][b_num]:
                 last_arrival = max(MOCK_SCHEDULE[target_dir][b_num])
@@ -118,10 +142,10 @@ def get_bus_data():
                 if any(b in rtNm for b in bus_nums):
                     bus_seconds = parse_bus_time(bus)
                     if bus_seconds < 9000:
-                        s_type, s_msg, s_act, s_pri = calculate_action(bus_seconds, distance)
+                        s_type, s_msg, s_act, s_pri = calculate_action(bus_seconds, distance, penalty)
                         all_buses.append({
                             "bus_number": rtNm, "station_name": target_station_name, "distance_str": f"{distance}m", 
-                            "seconds": bus_seconds, "status_type": s_type,
+                            "seconds": max(0, bus_seconds), "status_type": s_type,
                             "message": s_msg, "action_txt": s_act, "priority": s_pri,
                             "path_str": f"{start_loc_name} ➔ {target_station_name}"
                         })
@@ -130,10 +154,10 @@ def get_bus_data():
             for b_num in bus_nums:
                 for arr_time in MOCK_SCHEDULE[target_dir][b_num]:
                     sec_left = arr_time - current_time
-                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance)
+                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance, penalty)
                     all_buses.append({
                         "bus_number": b_num, "station_name": target_station_name, "distance_str": f"{distance}m", 
-                        "seconds": sec_left, "status_type": s_type,
+                        "seconds": max(0, sec_left), "status_type": s_type, # 0초 미만은 모두 0초(곧 도착)로 전송
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
                         "path_str": f"{start_loc_name} ➔ {target_station_name}"
                     })
@@ -143,10 +167,10 @@ def get_bus_data():
             if not filtered_buses and target_bus in bus_nums:
                 for arr_time in MOCK_SCHEDULE[target_dir][target_bus]:
                     sec_left = arr_time - current_time
-                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance)
+                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance, penalty)
                     filtered_buses.append({
                         "bus_number": target_bus, "station_name": target_station_name, "distance_str": f"{distance}m", 
-                        "seconds": sec_left, "status_type": s_type,
+                        "seconds": max(0, sec_left), "status_type": s_type,
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
                         "path_str": f"{start_loc_name} ➔ {target_station_name}"
                     })
@@ -155,20 +179,16 @@ def get_bus_data():
         if not all_buses:
             return jsonify({"status": "error", "message": "해당 노선의 운행 정보가 없습니다."})
 
-        # 🚨 핵심 로직: 버스 번호가 겹치면 가장 빨리 오는 1대만 남깁니다.
-        all_buses.sort(key=lambda x: x['seconds']) # 먼저 남은 시간(초) 순으로 오름차순 정렬
-        
+        # 번호 겹침 제거 (가장 빠른 차만 남김)
+        all_buses.sort(key=lambda x: x['seconds'])
         unique_buses = []
         seen_nums = set()
-        
         for b in all_buses:
             if b['bus_number'] not in seen_nums:
                 unique_buses.append(b)
                 seen_nums.add(b['bus_number'])
-                
-        all_buses = unique_buses # 중복이 제거된 깔끔한 리스트로 교체
+        all_buses = unique_buses 
 
-        # 최종적으로 우선순위(뛰어/걸어)와 시간순으로 다시 정렬
         all_buses.sort(key=lambda x: (x['priority'], x['seconds']))
         
         return jsonify({"status": "success", "best_bus": all_buses[0], "bus_list": all_buses})
