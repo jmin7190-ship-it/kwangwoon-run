@@ -26,24 +26,40 @@ STATION_NAMES = {"11285": "정문 앞", "11279": "광운대역"}
 
 STATION_ID_CACHE = {}
 
-def parse_arrmsg(time_str):
-    # 🚨 오디세이가 박스(dict)로 보내더라도 무조건 텍스트(문자열)로 강제 변환합니다!
-    time_str = str(time_str)
+def parse_arrmsg(time_data):
+    # 1. 오디세이가 이상한 포장지(딕셔너리)로 줬을 경우 껍질을 벗깁니다.
+    if isinstance(time_data, dict):
+        if 'arrmsg1' in time_data: time_data = time_data['arrmsg1']
+        elif '#text' in time_data: time_data = time_data['#text']
+        else: time_data = str(time_data)
+        
+    time_str = str(time_data).strip()
     
-    if not time_str or time_str == "{}" or time_str == "None": return 9999, "정보 없음"
+    # 2. 정보가 없으면 거릅니다.
+    if not time_str or time_str in ["{}", "None", "0", "-1"]: return 9999, "정보 없음"
     if "곧 도착" in time_str or "운행중" in time_str: return 60, "곧 도착"
     if "운행종료" in time_str or "출발대기" in time_str: return 9999, "종료/대기"
     
+    # 3. 정상적으로 '분', '초' 글씨가 있는지 확인
     minutes, seconds = 0, 0
     m_match = re.search(r'(\d+)분', time_str)
-    if m_match: minutes = int(m_match.group(1))
     s_match = re.search(r'(\d+)초', time_str)
-    if s_match: seconds = int(s_match.group(1))
     
-    station_match = re.search(r'(\d+)번째', time_str)
-    stations_left = f"{station_match.group(1)}번째 전" if station_match else ""
-    
-    return (minutes * 60) + seconds if s_match else minutes * 60, stations_left
+    if m_match or s_match:
+        if m_match: minutes = int(m_match.group(1))
+        if s_match: seconds = int(s_match.group(1))
+        
+        station_match = re.search(r'(\d+)번째', time_str)
+        stations_left = f"{station_match.group(1)}번째 전" if station_match else ""
+        
+        return (minutes * 60) + seconds, stations_left
+        
+    # 4. '분', '초' 글씨 없이 숫자만 덩그러니 온 경우 (초 단위로 계산해버림)
+    if time_str.isdigit():
+        return int(time_str), "초 (추정)"
+        
+    # 5. 그래도 도저히 해석할 수 없다면? 화면에 원본 데이터를 까발립니다! (디버깅용)
+    return 9999, f"[오류확인] {time_str[:20]}"
 
 def calculate_action(bus_seconds, distance):
     walk_speed = 1.27; run_speed = 4.0; buffer_time = 30  
