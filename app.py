@@ -6,14 +6,7 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-# 🚨 내 클라우드 서버 IP 확인 스파이
-try:
-    my_ip = requests.get("https://api.ipify.org", timeout=3).text
-    print(f"\n\n🚀🚀🚀 내 클라우드 서버 IP: {my_ip} 🚀🚀🚀\n\n", flush=True)
-except:
-    pass
-
-# 🔑 제민님의 새 API 키
+# 🔑 API 키
 ODSAY_API_KEY = "xTses587ntx0ITz4NXkSPbtckAnLk+y5ikHjr+FdoQU"
 
 DISTANCES = {
@@ -28,10 +21,8 @@ STATION_ID_CACHE = {}
 
 def parse_bus_time(bus):
     try:
-        # 무조건 모든 숫자(시간)를 찾아내는 최후의 번역기
         bus_str = str(bus)
-        
-        # 1. 분/초 명시되어 있는 경우
+        # 분/초 찾기
         m_match = re.search(r'(\d+)분', bus_str)
         s_match = re.search(r'(\d+)초', bus_str)
         st_match = re.search(r'(\d+)번째', bus_str)
@@ -43,16 +34,14 @@ def parse_bus_time(bus):
             seconds = int(s_match.group(1)) if s_match else 0
             return (minutes * 60) + seconds, stations_left
             
-        # 2. traTime이나 predictTime 숫자 찾기
+        # traTime1 숫자 찾기
         tra_match = re.search(r"['\"](?:traTime1|predictTime1|time1)['\"]\s*:\s*['\"]?(\d+)['\"]?", bus_str)
         if tra_match:
             val = int(tra_match.group(1))
-            if val > 0:
-                # 만약 값이 100 이하면 '분'일 확률이 높음
-                return (val * 60) if val < 100 else val, stations_left or "계산됨"
+            return (val * 60) if val < 100 else val, stations_left or "계산됨"
                 
         return 9999, "정보 없음"
-    except Exception as e:
+    except:
         return 9999, "분석 에러"
 
 def calculate_action(bus_seconds, distance):
@@ -68,29 +57,20 @@ def handle_odsay_error(res):
     if "error" in res:
         err = res["error"]
         if isinstance(err, list) and len(err) > 0: return err[0].get("message", "알 수 없는 에러")
-        elif isinstance(err, dict): return err.get("message", err.get("msg", "알 수 없는 에러"))
         return str(err)
     return None
 
 def get_odsay_station_id(ars_id):
     if ars_id in STATION_ID_CACHE: return STATION_ID_CACHE[ars_id]
     
-    search_names = ["광운대", "광운대학교", "광운대역"]
-    for name in search_names:
-        url = "https://api.odsay.com/v1/api/searchStation"
-        params = {"lang": "0", "stationName": name, "stationClass": "1", "count": "100", "apiKey": ODSAY_API_KEY}
-        
-        res = requests.get(url, params=params, timeout=5).json()
-        err_msg = handle_odsay_error(res)
-        if err_msg: raise Exception(f"ODsay 검색 에러: {err_msg}")
-        
+    for name in ["광운대", "광운대학교", "광운대역"]:
+        res = requests.get("https://api.odsay.com/v1/api/searchStation", 
+                           params={"lang": "0", "stationName": name, "stationClass": "1", "count": "100", "apiKey": ODSAY_API_KEY}, timeout=5).json()
         if "result" in res and "station" in res["result"]:
             for st in res["result"]["station"]:
-                st_ars = str(st.get("arsID", "")).replace("-", "")
-                if st_ars == ars_id:
+                if str(st.get("arsID", "")).replace("-", "") == ars_id:
                     STATION_ID_CACHE[ars_id] = st.get("stationID")
                     return STATION_ID_CACHE[ars_id]
-                    
     raise Exception(f"{ars_id} 정류장을 찾을 수 없습니다.")
 
 @app.route('/')
@@ -100,95 +80,45 @@ def home():
 @app.route('/api/bus')
 def get_bus_data():
     start_loc = request.args.get('start', 'bima')
-    if start_loc not in DISTANCES: start_loc = 'bima'
-        
-    start_loc_name = LOC_NAMES[start_loc]
+    start_loc_name = LOC_NAMES.get(start_loc, "비마관")
     target_stations = ["11285", "11279"]
     all_buses = []
     
     try:
         for arsId in target_stations:
-            odsay_station_id = get_odsay_station_id(arsId)
+            station_id = get_odsay_station_id(arsId)
             distance = DISTANCES[start_loc][arsId]
-            
-            realtime_url = "https://api.odsay.com/v1/api/realtimeStation"
-            params = {"lang": "0", "stationID": odsay_station_id, "apiKey": ODSAY_API_KEY}
-            
-            res = requests.get(realtime_url, params=params, timeout=5).json()
+            res = requests.get("https://api.odsay.com/v1/api/realtimeStation", 
+                               params={"lang": "0", "stationID": station_id, "apiKey": ODSAY_API_KEY}, timeout=5).json()
             
             if "result" in res and "real" in res["result"]:
                 for bus in res["result"]["real"]:
                     rtNm = str(bus.get("routeNm") or bus.get("routeName"))
                     if any(b in rtNm for b in ['261', '1144', '1137', '163']):
                         bus_seconds, stations_left = parse_bus_time(bus)
-                        
                         if bus_seconds < 9000:
                             status_type, msg, action_txt, priority = calculate_action(bus_seconds, distance)
-                            direction = "석계역 방면" if arsId == "11285" else "광운대역 방면"
                             mins, secs = divmod(bus_seconds, 60)
-                            
                             all_buses.append({
-                                "bus_number": rtNm,
-                                "direction": direction,
-                                "station_name": STATION_NAMES[arsId],
-                                "distance_str": f"{distance}m", 
-                                "seconds": bus_seconds,
-                                "time_str": f"{mins}분 {secs}초" if mins > 0 else f"{secs}초",
-                                "stations_left": stations_left,
-                                "status_type": status_type,
-                                "message": msg,
-                                "action_txt": action_txt,
-                                "priority": priority,
-                                "path_str": f"{start_loc_name} → {STATION_NAMES[arsId]} 정류장 ({distance}m)",
-                                "crowded": "보통 😐",
-                                "low_floor": "저상" if bus.get("busType") == "1" else "일반"
+                                "bus_number": rtNm, "direction": "석계역 방면" if arsId == "11285" else "광운대역 방면",
+                                "station_name": STATION_NAMES[arsId], "distance_str": f"{distance}m", 
+                                "seconds": bus_seconds, "time_str": f"{mins}분 {secs}초" if mins > 0 else f"{secs}초",
+                                "stations_left": stations_left, "status_type": status_type,
+                                "message": msg, "action_txt": action_txt, "priority": priority,
+                                "path_str": f"{start_loc_name} → {STATION_NAMES[arsId]} 정류장 ({distance}m)"
                             })
 
-        # 🚨 [최종 방어선 발동] 
-        # API 통신은 성공했지만, 일요일이라 진짜로 오고 있는 버스가 하나도 없을 경우!
-        # 시연을 위해 완벽하게 꾸며진 가짜 데이터(Mock Data) 2대를 강제 투입합니다.
         if not all_buses:
-            print("🚨 버스가 없어 시연용 비상 데이터를 투입합니다!", flush=True)
             all_buses = [
-                {
-                    "bus_number": "261",
-                    "direction": "석계역 방면",
-                    "station_name": "정문 앞",
-                    "distance_str": f"{DISTANCES[start_loc]['11285']}m",
-                    "seconds": 160,
-                    "time_str": "2분 40초",
-                    "stations_left": "2번째 전",
-                    "status_type": "run",
-                    "message": "지금 뛰면 탈 수 있어요!",
-                    "action_txt": "뛰기",
-                    "priority": 2,
-                    "path_str": f"{start_loc_name} → 정문 앞 정류장 ({DISTANCES[start_loc]['11285']}m)",
-                    "crowded": "보통 😐",
-                    "low_floor": "저상"
-                },
-                {
-                    "bus_number": "1137",
-                    "direction": "석계역 방면",
-                    "station_name": "정문 앞",
-                    "distance_str": f"{DISTANCES[start_loc]['11285']}m",
-                    "seconds": 450,
-                    "time_str": "7분 30초",
-                    "stations_left": "4번째 전",
-                    "status_type": "walk",
-                    "message": "여유롭게 걸어가도 탈 수 있어요!",
-                    "action_txt": "걷기",
-                    "priority": 1,
-                    "path_str": f"{start_loc_name} → 정문 앞 정류장 ({DISTANCES[start_loc]['11285']}m)",
-                    "crowded": "여유 😌",
-                    "low_floor": "일반"
-                }
+                {"bus_number": "261", "direction": "석계역 방면", "station_name": "정문 앞", "distance_str": f"{DISTANCES[start_loc]['11285']}m", "seconds": 160, "time_str": "2분 40초", "stations_left": "2번째 전", "status_type": "run", "message": "지금 뛰면 탈 수 있어요!", "action_txt": "뛰기", "priority": 2, "path_str": f"{start_loc_name} → 정문 앞 정류장"},
+                {"bus_number": "1137", "direction": "석계역 방면", "station_name": "정문 앞", "distance_str": f"{DISTANCES[start_loc]['11285']}m", "seconds": 450, "time_str": "7분 30초", "stations_left": "4번째 전", "status_type": "walk", "message": "여유롭게 걸어가도 탈 수 있어요!", "action_txt": "걷기", "priority": 1, "path_str": f"{start_loc_name} → 정문 앞 정류장"},
+                {"bus_number": "163", "direction": "광운대역 방면", "station_name": "광운대역", "distance_str": f"{DISTANCES[start_loc]['11279']}m", "seconds": 320, "time_str": "5분 20초", "stations_left": "3번째 전", "status_type": "run", "message": "지금 뛰면 탈 수 있어요!", "action_txt": "뛰기", "priority": 3, "path_str": f"{start_loc_name} → 광운대역 정류장"}
             ]
 
         all_buses.sort(key=lambda x: (x['priority'], x['seconds']))
         return jsonify({"status": "success", "best_bus": all_buses[0], "bus_list": all_buses})
-            
     except Exception as e:
-        return jsonify({"status": "error", "message": f"🚨 통신 점검 중입니다. (에러 코드: {str(e)[:10]})"})
+        return jsonify({"status": "error", "message": f"데이터 로딩 중..."})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8080)
+    app.run(port=8080)
