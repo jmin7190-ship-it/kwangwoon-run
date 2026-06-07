@@ -34,7 +34,7 @@
         .action-header { display: flex; align-items: center; gap: 20px; margin-bottom: 25px; }
         .circle-icon { width: 80px; height: 80px; min-width: 80px; background: var(--kw-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .circle-icon svg { width: 45px; height: 45px; fill: white; }
-        .action-title h2 { margin: 0; font-size: 20px; color: var(--kw-green); margin-bottom: 6px; word-break: keep-all; line-height: 1.3; }
+        .action-title h2 { margin: 0; font-size: 18px; color: var(--kw-green); margin-bottom: 6px; word-break: keep-all; line-height: 1.3; }
         .action-title p { margin: 0; font-size: 13px; color: var(--text-gray); font-weight: 600; line-height: 1.4;}
         .action-data { display: flex; justify-content: space-around; text-align: center; border-top: 1px dashed #eee; padding-top: 20px; }
         .data-box h3 { margin: 0; font-size: 12px; color: var(--text-gray); font-weight: 500; margin-bottom: 5px; }
@@ -56,7 +56,6 @@
         .bus-distance { font-size: 11px; color: #ff3b30; font-weight: 700; background: #ffebeb; padding: 2px 6px; border-radius: 4px; }
         .bus-time-info { text-align: right; }
         .bus-time-info strong { font-size: 16px; color: var(--kw-green); display: block; }
-        .bus-time-info span { font-size: 12px; color: var(--text-gray); }
         .tip-box { margin-top: 20px; background: #fffcf0; border: 1px solid #f4e4a2; padding: 15px 20px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center;}
         .tip-box span { font-size: 12px; color: #8a7322; }
         .tip-box .smile { font-weight: 700; font-size: 14px; color: #111; }
@@ -91,18 +90,17 @@
         </div>
     </div>
 
-    <div class="section-title">2. 탑승할 정류장(방향)을 선택해주세요</div>
-    <div class="section-sub">선택한 정류장까지의 도보 이동 시간이 행동 지침에 자동 계산됩니다.</div>
+    <div class="section-title">2. 탑승 방향을 선택해주세요</div>
     <div class="button-group" id="dir-group">
         <div class="building-card active" id="dir-11285" onclick="selectDir('11285')">
             <div class="check-badge">✔</div>
             <svg viewBox="0 0 24 24"><path d="M12 2c-4.42 0-8 3.58-8 8 0 4.73 7.05 13.06 7.62 13.73.19.23.47.37.78.37s.59-.14.78-.37c.57-.67 7.62-9 7.62-13.73 0-4.42-3.58-8-8-8zm0 11.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-            <span style="font-size:13px;">정문 앞 (석계 방면)</span>
+            <span style="font-size:13px;">정문 앞 (석계행)</span>
         </div>
         <div class="building-card" id="dir-11279" onclick="selectDir('11279')">
             <div class="check-badge">✔</div>
             <svg viewBox="0 0 24 24"><path d="M12 2c-4.42 0-8 3.58-8 8 0 4.73 7.05 13.06 7.62 13.73.19.23.47.37.78.37s.59-.14.78-.37c.57-.67 7.62-9 7.62-13.73 0-4.42-3.58-8-8-8zm0 11.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-            <span style="font-size:13px;">광운대역 (종점 방면)</span>
+            <span style="font-size:13px;">광운대역 (종점행)</span>
         </div>
     </div>
 
@@ -118,7 +116,7 @@
             <div class="data-box"><h3>🕒 버스 도착 시간</h3><p id="main-time">-</p></div>
             <div class="data-box"><h3>👟 추천 행동</h3><p id="main-action">-</p></div>
         </div>
-        <div class="action-footer"><span id="main-submsg">거리 기반 도보/뜀걸음 시간이 반영되었습니다.</span><span>☆</span></div>
+        <div class="action-footer"><span id="main-submsg">거리 기반 도보/뜀걸음 시간이 자동 반영되었습니다.</span><span>☆</span></div>
     </div>
 
     <div class="section-title">4. 실시간 정보 갱신</div>
@@ -128,7 +126,7 @@
         <div class="timer-sub">타이머가 0이 되면 서버와 실시간 도착 정보가 동기화됩니다.</div>
     </div>
 
-    <div class="section-title">5. 주요 버스 도착 정보</div>
+    <div class="section-title">5. 주요 버스 도착 현황</div>
     <div class="bus-list" id="bus-list-container">
         <div style="text-align:center; padding: 20px; color:#aaa;">서버 응답을 기다리는 중...</div>
     </div>
@@ -138,58 +136,82 @@
 
 <script>
     let currentBuilding = 'bima';
-    let currentDirection = '11285'; // 기본값: 정문 앞
+    let currentDirection = '11285'; 
     let refreshSeconds = 60; 
     let timerInterval = null;
+    let cachedBusData = null; // 백엔드에서 받은 데이터를 저장해두는 공간
+
+    // 초를 입력받아 분 단위 또는 "곧 도착"으로 예쁘게 바꿔주는 함수
+    function formatMinutes(seconds) {
+        if (seconds <= 60) return "곧 도착";
+        return Math.floor(seconds / 60) + "분";
+    }
 
     function startTimer() {
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(() => {
             if(refreshSeconds > 0) {
                 refreshSeconds--;
-                let s = refreshSeconds;
-                document.getElementById('big-timer').innerText = `00:${s.toString().padStart(2, '0')}`;
+                document.getElementById('big-timer').innerText = `00:${refreshSeconds.toString().padStart(2, '0')}`;
                 document.getElementById('progress-bar').style.width = `${(refreshSeconds / 60) * 100}%`;
+                
+                // --- 🚨 핵심 수정: 매초 버스 도착 시간도 같이 줄어듭니다! ---
+                if(cachedBusData && cachedBusData.status === "success") {
+                    // 메인 추천 버스 시간 1초 차감
+                    if(cachedBusData.best_bus.seconds > 0) cachedBusData.best_bus.seconds--;
+                    document.getElementById('main-time').innerText = formatMinutes(cachedBusData.best_bus.seconds);
+                    
+                    // 하단 버스 리스트들 시간 1초 차감 및 화면 즉시 업데이트
+                    const listTimeElements = document.querySelectorAll('.bus-list-time-dynamic');
+                    cachedBusData.bus_list.forEach((bus, index) => {
+                        if(bus.seconds > 0) bus.seconds--;
+                        if(listTimeElements[index]) {
+                            listTimeElements[index].innerText = formatMinutes(bus.seconds);
+                        }
+                    });
+                }
             } else {
-                fetchData(); // 0초가 되면 데이터 강제 새로고침
+                fetchData(); 
             }
         }, 1000);
     }
 
     function fetchData() {
-        // 데이터 통신 시작 시 타이머 60초 리셋
         refreshSeconds = 60; 
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('big-timer').innerText = '00:60';
         
-        // 백엔드로 건물과 정류장 방향 데이터를 모두 보냅니다.
         fetch(`/api/bus?start=${currentBuilding}&dir=${currentDirection}`)
             .then(res => res.json())
             .then(data => {
+                cachedBusData = data; // 가져온 데이터를 저장해둡니다.
+                
                 if(data.status === "success") {
                     const best = data.best_bus;
                     
                     document.getElementById('main-msg').innerText = best.message;
                     document.getElementById('main-path').innerText = best.path_str;
-                    document.getElementById('main-time').innerText = best.time_str;
+                    
+                    // 백엔드에서 준 글자 대신, 클라이언트 타이머 함수를 사용해 "X분" 렌더링
+                    document.getElementById('main-time').innerText = formatMinutes(best.seconds);
                     document.getElementById('main-action').innerText = best.action_txt;
 
                     const isRun = best.status_type === 'run';
                     const isGiveUp = best.status_type === 'giveup';
                     
-                    // 상태에 따른 직관적인 UI 컬러링 (포기는 회색 처리)
-                    let mainColor = '#108a47'; // 초록 (여유)
-                    if(isRun) mainColor = '#ff3b30'; // 빨강 (뜀걸음)
-                    if(isGiveUp) mainColor = '#777777'; // 회색 (포기)
+                    let mainColor = '#108a47'; // 초록
+                    if(isRun) mainColor = '#ff3b30'; // 빨강
+                    if(isGiveUp) mainColor = '#777777'; // 회색
 
                     document.querySelector('.action-card').style.borderColor = mainColor;
                     document.querySelector('.circle-icon').style.background = mainColor;
                     document.getElementById('main-msg').style.color = mainColor;
-                    document.getElementById('big-timer').style.color = '#108a47'; // 정보 갱신 타이머는 항상 초록 유지
+                    document.getElementById('big-timer').style.color = '#108a47';
                     
                     const listHtml = data.bus_list.map(bus => {
                         const colorClass = bus.bus_number === '261' ? 'green' : 'blue';
-                        return `<div class="bus-item"><div class="bus-info"><span class="bus-num ${colorClass}">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 떨어짐</span></div><div class="bus-time-info"><strong>${bus.time_str}</strong><span>${bus.stations_left}</span></div></div>`;
+                        // 식별용 클래스 bus-list-time-dynamic을 부여해 1초마다 텍스트를 업데이트합니다.
+                        return `<div class="bus-item"><div class="bus-info"><span class="bus-num ${colorClass}">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 거리</span></div><div class="bus-time-info"><strong class="bus-list-time-dynamic">${formatMinutes(bus.seconds)}</strong></div></div>`;
                     }).join('');
                     document.getElementById('bus-list-container').innerHTML = listHtml;
                 } else {
