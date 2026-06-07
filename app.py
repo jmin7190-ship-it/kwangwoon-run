@@ -6,14 +6,14 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-# 🚨 새롭게 추가할 5줄 (내 IP 스파이)
+# 🚨 내 클라우드 서버 IP 확인 스파이
 try:
     my_ip = requests.get("https://api.ipify.org", timeout=3).text
     print(f"\n\n🚀🚀🚀 내 클라우드 서버 IP: {my_ip} 🚀🚀🚀\n\n", flush=True)
 except:
     pass
 
-# 🔑 완벽하게 인증 통과된 제민님의 새 API 키
+# 🔑 제민님의 새 API 키
 ODSAY_API_KEY = "xTses587ntx0ITz4NXkSPbtckAnLk+y5ikHjr+FdoQU"
 
 DISTANCES = {
@@ -27,39 +27,45 @@ STATION_NAMES = {"11285": "정문 앞", "11279": "광운대역"}
 STATION_ID_CACHE = {}
 
 def parse_arrmsg(time_data):
-    # 1. 오디세이가 이상한 포장지(딕셔너리)로 줬을 경우 껍질을 벗깁니다.
-    if isinstance(time_data, dict):
-        if 'arrmsg1' in time_data: time_data = time_data['arrmsg1']
-        elif '#text' in time_data: time_data = time_data['#text']
-        else: time_data = str(time_data)
+    try:
+        # 무조건 문자열로 변환해서 오디세이 포장지 부수기
+        full_str = str(time_data).strip()
         
-    time_str = str(time_data).strip()
-    
-    # 2. 정보가 없으면 거릅니다.
-    if not time_str or time_str in ["{}", "None", "0", "-1"]: return 9999, "정보 없음"
-    if "곧 도착" in time_str or "운행중" in time_str: return 60, "곧 도착"
-    if "운행종료" in time_str or "출발대기" in time_str: return 9999, "종료/대기"
-    
-    # 3. 정상적으로 '분', '초' 글씨가 있는지 확인
-    minutes, seconds = 0, 0
-    m_match = re.search(r'(\d+)분', time_str)
-    s_match = re.search(r'(\d+)초', time_str)
-    
-    if m_match or s_match:
-        if m_match: minutes = int(m_match.group(1))
-        if s_match: seconds = int(s_match.group(1))
+        if not full_str or full_str in ["{}", "None", "0", "-1"]: return 9999, "정보 없음"
+        if "운행종료" in full_str or "출발대기" in full_str: return 9999, "종료/대기"
+        if "곧 도착" in full_str or "운행중" in full_str: return 60, "곧 도착"
         
-        station_match = re.search(r'(\d+)번째', time_str)
-        stations_left = f"{station_match.group(1)}번째 전" if station_match else ""
+        minutes, seconds = 0, 0
+        stations_left = ""
         
-        return (minutes * 60) + seconds, stations_left
+        # 1. 텍스트 안에 '분', '초', '번째'가 예쁘게 있는 경우
+        m_match = re.search(r'(\d+)분', full_str)
+        s_match = re.search(r'(\d+)초', full_str)
+        st_match = re.search(r'(\d+)번째', full_str)
         
-    # 4. '분', '초' 글씨 없이 숫자만 덩그러니 온 경우 (초 단위로 계산해버림)
-    if time_str.isdigit():
-        return int(time_str), "초 (추정)"
+        if st_match:
+            stations_left = f"{st_match.group(1)}번째 전"
+            
+        if m_match or s_match:
+            if m_match: minutes = int(m_match.group(1))
+            if s_match: seconds = int(s_match.group(1))
+            return (minutes * 60) + seconds, stations_left
+            
+        # 2. 🚨 핵심: 딕셔너리 포장지 안에 숨겨진 'traTime1'(초 단위 시간) 찾아내기!
+        tra_match = re.search(r"['\"]traTime1?['\"]\s*:\s*['\"]?(\d+)['\"]?", full_str)
+        if tra_match:
+            sec = int(tra_match.group(1))
+            if sec > 0: return sec, stations_left or "계산됨"
+            
+        # 3. 숫자만 덩그러니 있을 경우
+        if full_str.isdigit():
+            return int(full_str), "초 (추정)"
+            
+        # 진짜 아무런 시간 정보가 없으면 정보없음 처리
+        return 9999, f"[정보 없음]"
         
-    # 5. 그래도 도저히 해석할 수 없다면? 화면에 원본 데이터를 까발립니다! (디버깅용)
-    return 9999, f"[오류확인] {time_str[:20]}"
+    except Exception as e:
+        return 9999, "분석 에러"
 
 def calculate_action(bus_seconds, distance):
     walk_speed = 1.27; run_speed = 4.0; buffer_time = 30  
@@ -82,7 +88,6 @@ def get_odsay_station_id(ars_id):
     if ars_id in STATION_ID_CACHE: return STATION_ID_CACHE[ars_id]
     
     search_names = ["광운대", "광운대학교", "광운대역"]
-    
     for name in search_names:
         url = "https://api.odsay.com/v1/api/searchStation"
         params = {"lang": "0", "stationName": name, "stationClass": "1", "count": "100", "apiKey": ODSAY_API_KEY}
@@ -133,6 +138,7 @@ def get_bus_data():
                         if not arrmsg1: continue
                         
                         bus_seconds, stations_left = parse_arrmsg(arrmsg1)
+                        # 🚨 필터망을 10000초로 넓혀서 숨겨진 버스들을 건져 올립니다!
                         if bus_seconds < 10000:
                             status_type, msg, action_txt, priority = calculate_action(bus_seconds, distance)
                             direction = "석계역 방면" if arsId == "11285" else "광운대역 방면"
