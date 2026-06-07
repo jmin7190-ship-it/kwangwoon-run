@@ -104,7 +104,11 @@
         </div>
     </div>
 
-    <div class="section-title">3. 도착 정보 및 행동 지침 <span style="font-size: 11px; font-weight:normal; color:#aaa; cursor:pointer;" onclick="fetchData()">↻ 새로고침</span></div>
+    <div class="section-title">3. 탑승할 노선을 선택해주세요</div>
+    <div class="button-group" id="bus-group">
+        </div>
+
+    <div class="section-title">4. 도착 정보 및 행동 지침 <span style="font-size: 11px; font-weight:normal; color:#aaa; cursor:pointer;" onclick="fetchData()">↻ 새로고침</span></div>
     <div class="action-card">
         <div class="action-header">
             <div class="circle-icon" id="main-icon">
@@ -116,17 +120,17 @@
             <div class="data-box"><h3>🕒 버스 도착 시간</h3><p id="main-time">-</p></div>
             <div class="data-box"><h3>👟 추천 행동</h3><p id="main-action">-</p></div>
         </div>
-        <div class="action-footer"><span id="main-submsg">거리 기반 도보/뜀걸음 시간이 자동 반영되었습니다.</span><span>☆</span></div>
+        <div class="action-footer"><span id="main-submsg">특정 노선 필터링이 적용되었습니다.</span><span>☆</span></div>
     </div>
 
-    <div class="section-title">4. 실시간 정보 갱신</div>
+    <div class="section-title">5. 실시간 정보 갱신</div>
     <div class="timer-card">
         <div class="big-time" id="big-timer">00:60</div>
         <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-bar"></div></div>
         <div class="timer-sub">타이머가 0이 되면 서버와 실시간 도착 정보가 동기화됩니다.</div>
     </div>
 
-    <div class="section-title">5. 주요 버스 도착 현황</div>
+    <div class="section-title">6. 주요 버스 도착 현황</div>
     <div class="bus-list" id="bus-list-container">
         <div style="text-align:center; padding: 20px; color:#aaa;">서버 응답을 기다리는 중...</div>
     </div>
@@ -137,14 +141,32 @@
 <script>
     let currentBuilding = 'bima';
     let currentDirection = '11285'; 
+    let currentBus = 'all'; // 전체(가장 빠른 버스) 또는 특정 노선
     let refreshSeconds = 60; 
     let timerInterval = null;
-    let cachedBusData = null; // 백엔드에서 받은 데이터를 저장해두는 공간
+    let cachedBusData = null;
 
-    // 초를 입력받아 분 단위 또는 "곧 도착"으로 예쁘게 바꿔주는 함수
     function formatMinutes(seconds) {
         if (seconds <= 60) return "곧 도착";
         return Math.floor(seconds / 60) + "분";
+    }
+
+    // 방향에 따라 버스 버튼을 동적으로 그려주는 함수
+    function updateBusButtons() {
+        const group = document.getElementById('bus-group');
+        let buses = currentDirection === '11285' ? ['261', '1137', '163'] : ['163', '1144', '261'];
+        
+        // 현재 선택된 버스가 바뀐 정류장에 안 서는 버스라면 'all'로 리셋
+        if (currentBus !== 'all' && !buses.includes(currentBus)) {
+            currentBus = 'all';
+        }
+
+        let html = `<div class="building-card ${currentBus === 'all' ? 'active' : ''}" style="padding: 10px 5px;" onclick="selectBus('all')"><div class="check-badge">✔</div><span>가장 빠른 차</span></div>`;
+        buses.forEach(b => {
+            let isActive = currentBus === b ? 'active' : '';
+            html += `<div class="building-card ${isActive}" style="padding: 10px 5px;" onclick="selectBus('${b}')"><div class="check-badge">✔</div><span>${b}번</span></div>`;
+        });
+        group.innerHTML = html;
     }
 
     function startTimer() {
@@ -155,13 +177,10 @@
                 document.getElementById('big-timer').innerText = `00:${refreshSeconds.toString().padStart(2, '0')}`;
                 document.getElementById('progress-bar').style.width = `${(refreshSeconds / 60) * 100}%`;
                 
-                // --- 🚨 핵심 수정: 매초 버스 도착 시간도 같이 줄어듭니다! ---
-                if(cachedBusData && cachedBusData.status === "success") {
-                    // 메인 추천 버스 시간 1초 차감
+                if(cachedBusData && cachedBusData.status === "success" && cachedBusData.best_bus) {
                     if(cachedBusData.best_bus.seconds > 0) cachedBusData.best_bus.seconds--;
                     document.getElementById('main-time').innerText = formatMinutes(cachedBusData.best_bus.seconds);
                     
-                    // 하단 버스 리스트들 시간 1초 차감 및 화면 즉시 업데이트
                     const listTimeElements = document.querySelectorAll('.bus-list-time-dynamic');
                     cachedBusData.bus_list.forEach((bus, index) => {
                         if(bus.seconds > 0) bus.seconds--;
@@ -181,27 +200,26 @@
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('big-timer').innerText = '00:60';
         
-        fetch(`/api/bus?start=${currentBuilding}&dir=${currentDirection}`)
+        // URL에 bus 파라미터가 추가되었습니다!
+        fetch(`/api/bus?start=${currentBuilding}&dir=${currentDirection}&bus=${currentBus}`)
             .then(res => res.json())
             .then(data => {
-                cachedBusData = data; // 가져온 데이터를 저장해둡니다.
+                cachedBusData = data; 
                 
                 if(data.status === "success") {
                     const best = data.best_bus;
                     
                     document.getElementById('main-msg').innerText = best.message;
                     document.getElementById('main-path').innerText = best.path_str;
-                    
-                    // 백엔드에서 준 글자 대신, 클라이언트 타이머 함수를 사용해 "X분" 렌더링
                     document.getElementById('main-time').innerText = formatMinutes(best.seconds);
                     document.getElementById('main-action').innerText = best.action_txt;
 
                     const isRun = best.status_type === 'run';
                     const isGiveUp = best.status_type === 'giveup';
                     
-                    let mainColor = '#108a47'; // 초록
-                    if(isRun) mainColor = '#ff3b30'; // 빨강
-                    if(isGiveUp) mainColor = '#777777'; // 회색
+                    let mainColor = '#108a47'; 
+                    if(isRun) mainColor = '#ff3b30'; 
+                    if(isGiveUp) mainColor = '#777777'; 
 
                     document.querySelector('.action-card').style.borderColor = mainColor;
                     document.querySelector('.circle-icon').style.background = mainColor;
@@ -210,7 +228,6 @@
                     
                     const listHtml = data.bus_list.map(bus => {
                         const colorClass = bus.bus_number === '261' ? 'green' : 'blue';
-                        // 식별용 클래스 bus-list-time-dynamic을 부여해 1초마다 텍스트를 업데이트합니다.
                         return `<div class="bus-item"><div class="bus-info"><span class="bus-num ${colorClass}">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 거리</span></div><div class="bus-time-info"><strong class="bus-list-time-dynamic">${formatMinutes(bus.seconds)}</strong></div></div>`;
                     }).join('');
                     document.getElementById('bus-list-container').innerHTML = listHtml;
@@ -238,9 +255,17 @@
         document.querySelectorAll('#dir-' + dir).forEach(el => el.classList.add('active'));
         document.querySelectorAll('.building-card[id^="dir-"]').forEach(el => { if(el.id !== 'dir-' + dir) el.classList.remove('active'); });
         currentDirection = dir;
+        updateBusButtons(); // 정류장이 바뀌면 노선 버튼도 갱신
         fetchData();
     }
 
+    function selectBus(busNum) {
+        currentBus = busNum;
+        updateBusButtons(); // 클릭 시 시각적 활성화 변경
+        fetchData();
+    }
+
+    updateBusButtons(); // 초기 노선 버튼 렌더링
     fetchData();
     startTimer();
 </script>
