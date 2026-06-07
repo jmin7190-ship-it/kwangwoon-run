@@ -4,15 +4,13 @@ import requests
 import re
 import math
 import random
-import time  # 현실 시간을 추적하기 위해 추가됨
+import time
 
 app = Flask(__name__)
 CORS(app)
 
-# 🔑 API 키
 ODSAY_API_KEY = "xTses587ntx0ITz4NXkSPbtckAnLk+y5ikHjr+FdoQU"
 
-# 건물에서 각 정류장까지의 실제 거리(m) 테이블
 DISTANCES = {
     "bima": {"11285": 150, "11279": 500},     
     "chambit": {"11285": 500, "11279": 850},  
@@ -20,10 +18,9 @@ DISTANCES = {
 }
 LOC_NAMES = {"bima": "비마관", "chambit": "참빛관", "library": "중앙도서관"}
 STATION_NAMES = {"11285": "정문 앞 정류장", "11279": "광운대역 정류장"}
-
 STATION_ID_CACHE = {}
 
-# 🚨 핵심: 가짜 버스들의 '도착 시간'을 기억하는 서버 메모리
+# 버스 노선별 도착 일정을 백그라운드에서 기억하는 메모리
 MOCK_SCHEDULE = {}
 
 def parse_bus_time(bus):
@@ -41,16 +38,12 @@ def parse_bus_time(bus):
         if tra_match:
             val = int(tra_match.group(1))
             return (val * 60) if val < 100 else val
-                
         return 9999
     except:
         return 9999
 
 def calculate_action(bus_seconds, distance):
-    # 공학적 거리 로직 반영 (1.27m/s = 성인 도보, 4.0m/s = 뜀걸음, 안전 마진 30초)
-    walk_speed = 1.27
-    run_speed = 4.0
-    buffer_time = 30  
+    walk_speed = 1.27; run_speed = 4.0; buffer_time = 30  
     
     walk_time_sec = (distance / walk_speed) + buffer_time
     run_time_sec = (distance / run_speed) + buffer_time
@@ -58,7 +51,6 @@ def calculate_action(bus_seconds, distance):
     walk_mins = math.ceil(walk_time_sec / 60)
     spare_sec = bus_seconds - walk_time_sec
 
-    # 논리 분기점
     if spare_sec >= 60: 
         spare_mins = int(spare_sec // 60)
         return "walk", f"이동에 {walk_mins}분 소요되며, {spare_mins}분 정도 더 여유가 있어요!", "걷기", 1
@@ -71,7 +63,6 @@ def calculate_action(bus_seconds, distance):
 
 def get_odsay_station_id(ars_id):
     if ars_id in STATION_ID_CACHE: return STATION_ID_CACHE[ars_id]
-    
     for name in ["광운대", "광운대학교", "광운대역"]:
         res = requests.get("https://api.odsay.com/v1/api/searchStation", 
                            params={"lang": "0", "stationName": name, "stationClass": "1", "count": "100", "apiKey": ODSAY_API_KEY}, timeout=5).json()
@@ -90,15 +81,38 @@ def home():
 def get_bus_data():
     start_loc = request.args.get('start', 'bima')
     target_dir = request.args.get('dir', '11285') 
+    target_bus = request.args.get('bus', 'all') # 프론트엔드가 선택한 특정 노선 번호
     
     start_loc_name = LOC_NAMES.get(start_loc, "비마관")
     target_station_name = STATION_NAMES.get(target_dir, "정문 앞 정류장")
     distance = DISTANCES[start_loc][target_dir] 
     
+    current_time = int(time.time())
     all_buses = []
     
+    # 방향에 따른 버스 노선 초기화
+    if target_dir not in MOCK_SCHEDULE:
+        MOCK_SCHEDULE[target_dir] = {}
+    bus_nums = ["261", "1137", "163"] if target_dir == "11285" else ["163", "1144", "261"]
+
+    # 🚨 배차 무한 생성기 로직 (항상 백그라운드에서 동작)
+    for b_num in bus_nums:
+        if b_num not in MOCK_SCHEDULE[target_dir]:
+            MOCK_SCHEDULE[target_dir][b_num] = []
+
+        # 1. 이미 도착해서 떠난 버스(도착시간 < 현재시간 - 10초)는 스케줄에서 과감히 삭제!
+        MOCK_SCHEDULE[target_dir][b_num] = [t for t in MOCK_SCHEDULE[target_dir][b_num] if t > current_time - 10]
+
+        # 2. 버스가 비어있으면 5~10분 간격으로 다음 배차를 자동으로 무한 충전!
+        while len(MOCK_SCHEDULE[target_dir][b_num]) < 2:
+            if MOCK_SCHEDULE[target_dir][b_num]:
+                last_arrival = max(MOCK_SCHEDULE[target_dir][b_num])
+                new_arr = last_arrival + random.randint(300, 600) # 이전 버스로부터 5~10분 뒤
+            else:
+                new_arr = current_time + random.randint(30, 240) # 30초~4분 이내 즉시 배차
+            MOCK_SCHEDULE[target_dir][b_num].append(new_arr)
+
     try:
-        # 1. 실제 공공데이터 API 호출 시도
         station_id = get_odsay_station_id(target_dir)
         res = requests.get("https://api.odsay.com/v1/api/realtimeStation", 
                            params={"lang": "0", "stationID": station_id, "apiKey": ODSAY_API_KEY}, timeout=5).json()
@@ -106,76 +120,54 @@ def get_bus_data():
         if "result" in res and "real" in res["result"]:
             for bus in res["result"]["real"]:
                 rtNm = str(bus.get("routeNm") or bus.get("routeName"))
-                if any(b in rtNm for b in ['261', '1144', '1137', '163']):
+                if any(b in rtNm for b in bus_nums):
                     bus_seconds = parse_bus_time(bus)
                     if bus_seconds < 9000:
-                        status_type, msg, action_txt, priority = calculate_action(bus_seconds, distance)
+                        s_type, s_msg, s_act, s_pri = calculate_action(bus_seconds, distance)
                         all_buses.append({
-                            "bus_number": rtNm, 
-                            "station_name": target_station_name, 
-                            "distance_str": f"{distance}m", 
-                            "seconds": bus_seconds,
-                            "status_type": status_type,
-                            "message": msg, "action_txt": action_txt, "priority": priority,
+                            "bus_number": rtNm, "station_name": target_station_name, "distance_str": f"{distance}m", 
+                            "seconds": bus_seconds, "status_type": s_type,
+                            "message": s_msg, "action_txt": s_act, "priority": s_pri,
                             "path_str": f"{start_loc_name} ➔ {target_station_name}"
                         })
 
-        # 2. 공공데이터가 없거나 통신 실패 시 -> 가상 스케줄러(Mock) 가동
+        # 실시간 데이터가 없거나 에러 시 백그라운드의 가상 스케줄러 데이터를 꺼내옴
         if not all_buses:
-            current_time = int(time.time()) # 현재 현실 시간 추적
-            
-            # 처음 호출된 방향이면 빈 리스트 생성
-            if target_dir not in MOCK_SCHEDULE:
-                MOCK_SCHEDULE[target_dir] = []
-                
-            # (핵심 1) 이미 도착 시간이 지나간(0초 미만) 버스는 삭제
-            MOCK_SCHEDULE[target_dir] = [b for b in MOCK_SCHEDULE[target_dir] if b['arrival_time'] > current_time]
-            
-            # (핵심 2) 화면에 표시할 버스가 3대 미만이면 뒤에 새 버스 배차
-            bus_nums = ["261", "1137", "163"] if target_dir == "11285" else ["163", "1144", "261"]
-            
-            while len(MOCK_SCHEDULE[target_dir]) < 3:
-                if MOCK_SCHEDULE[target_dir]:
-                    # 이전 버스가 있다면 그 버스보다 2~4분 뒤에 오도록 배차
-                    last_arrival = max(b['arrival_time'] for b in MOCK_SCHEDULE[target_dir])
-                    new_arrival = last_arrival + random.randint(120, 240)
-                else:
-                    # 첫 버스는 지금으로부터 1~3분 뒤 도착
-                    new_arrival = current_time + random.randint(60, 180)
-                
-                # 번호가 겹치지 않게 배정
-                used_nums = [b['num'] for b in MOCK_SCHEDULE[target_dir]]
-                avail_nums = [n for n in bus_nums if n not in used_nums]
-                b_num = avail_nums[0] if avail_nums else random.choice(bus_nums)
-                
-                MOCK_SCHEDULE[target_dir].append({
-                    "num": b_num,
-                    "arrival_time": new_arrival
-                })
-            
-            # (핵심 3) 배차된 가상 버스들의 '남은 시간'을 계산하여 프론트엔드에 전달
-            for b in MOCK_SCHEDULE[target_dir]:
-                sec_left = b['arrival_time'] - current_time # 현실 시간만큼 깎인 정확한 남은 시간
-                s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance) 
-                
-                all_buses.append({
-                    "bus_number": b['num'], 
-                    "station_name": target_station_name, 
-                    "distance_str": f"{distance}m", 
-                    "seconds": sec_left, 
-                    "status_type": s_type, 
-                    "message": s_msg, 
-                    "action_txt": s_act, 
-                    "priority": s_pri, 
-                    "path_str": f"{start_loc_name} ➔ {target_station_name}"
-                })
+            for b_num in bus_nums:
+                for arr_time in MOCK_SCHEDULE[target_dir][b_num]:
+                    sec_left = arr_time - current_time
+                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance)
+                    all_buses.append({
+                        "bus_number": b_num, "station_name": target_station_name, "distance_str": f"{distance}m", 
+                        "seconds": sec_left, "status_type": s_type,
+                        "message": s_msg, "action_txt": s_act, "priority": s_pri,
+                        "path_str": f"{start_loc_name} ➔ {target_station_name}"
+                    })
 
-        # 최종 정렬 및 전송
+        # 🚨 노선 필터링 로직: 사용자가 특정 버스를 선택했다면, 그 버스만 남깁니다.
+        if target_bus != 'all':
+            filtered_buses = [b for b in all_buses if b['bus_number'] == target_bus]
+            
+            # (안전망) 사용자가 고른 버스가 하필 실시간 데이터에서 빠져있다면, 가상 스케줄에서 그 버스만 강제로 빌려옵니다.
+            if not filtered_buses and target_bus in bus_nums:
+                for arr_time in MOCK_SCHEDULE[target_dir][target_bus]:
+                    sec_left = arr_time - current_time
+                    s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance)
+                    filtered_buses.append({
+                        "bus_number": target_bus, "station_name": target_station_name, "distance_str": f"{distance}m", 
+                        "seconds": sec_left, "status_type": s_type,
+                        "message": s_msg, "action_txt": s_act, "priority": s_pri,
+                        "path_str": f"{start_loc_name} ➔ {target_station_name}"
+                    })
+            all_buses = filtered_buses
+
+        if not all_buses:
+            return jsonify({"status": "error", "message": "해당 노선의 운행 정보가 없습니다."})
+
         all_buses.sort(key=lambda x: (x['priority'], x['seconds']))
         return jsonify({"status": "success", "best_bus": all_buses[0], "bus_list": all_buses})
-        
     except Exception as e:
-        return jsonify({"status": "error", "message": f"데이터 로딩 중 에러가 발생했습니다."})
+        return jsonify({"status": "error", "message": f"데이터 통신 에러가 발생했습니다."})
 
 if __name__ == '__main__':
     app.run(port=8080)
