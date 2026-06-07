@@ -6,6 +6,13 @@ import re
 app = Flask(__name__)
 CORS(app)
 
+# 🚨 새롭게 추가할 5줄 (내 IP 스파이)
+try:
+    my_ip = requests.get("https://api.ipify.org", timeout=3).text
+    print(f"\n\n🚀🚀🚀 내 클라우드 서버 IP: {my_ip} 🚀🚀🚀\n\n", flush=True)
+except:
+    pass
+
 # 🔑 완벽하게 인증 통과된 제민님의 새 API 키
 ODSAY_API_KEY = "xTses587ntx0ITz4NXkSPbtckAnLk+y5ikHjr+FdoQU"
 
