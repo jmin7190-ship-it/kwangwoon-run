@@ -153,7 +153,8 @@
 
     function updateBusButtons() {
         const group = document.getElementById('bus-group');
-        let buses = currentDirection === '11285' ? ['261', '1137', '163'] : ['163', '1144', '261'];
+        // 🚨 수정: 방향에 상관없이 1017, 1137, 261 고정
+        let buses = ['1017', '1137', '261'];
         
         if (currentBus !== 'all' && !buses.includes(currentBus)) {
             currentBus = 'all';
@@ -225,7 +226,8 @@
                     document.getElementById('big-timer').style.color = '#108a47';
                     
                     const listHtml = data.bus_list.map(bus => {
-                        const colorClass = bus.bus_number === '261' ? 'green' : 'blue';
+                        // 🚨 수정: 261번은 파란색(blue), 1017 및 1137번은 초록색(green) 적용
+                        const colorClass = bus.bus_number.includes('261') ? 'blue' : 'green';
                         return `<div class="bus-item"><div class="bus-info"><span class="bus-num ${colorClass}">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 거리</span></div><div class="bus-time-info"><strong class="bus-list-time-dynamic">${formatMinutes(bus.seconds)}</strong></div></div>`;
                     }).join('');
                     document.getElementById('bus-list-container').innerHTML = listHtml;
