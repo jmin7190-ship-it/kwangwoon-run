@@ -50,8 +50,6 @@
         .bus-item:last-child { border-bottom: none; }
         .bus-info { display: flex; align-items: center; gap: 10px; }
         .bus-num { padding: 4px 10px; border-radius: 4px; font-weight: 800; color: white; font-size: 14px; }
-        .bus-num.blue { background-color: var(--kw-blue); }
-        .bus-num.green { background-color: var(--kw-green); }
         .bus-dir { font-size: 14px; font-weight: 600; }
         .bus-distance { font-size: 11px; color: #ff3b30; font-weight: 700; background: #ffebeb; padding: 2px 6px; border-radius: 4px; }
         .bus-time-info { text-align: right; }
@@ -153,7 +151,6 @@
 
     function updateBusButtons() {
         const group = document.getElementById('bus-group');
-        // 🚨 수정: 방향에 상관없이 1017, 1137, 261 고정
         let buses = ['1017', '1137', '261'];
         
         if (currentBus !== 'all' && !buses.includes(currentBus)) {
@@ -177,7 +174,6 @@
                 document.getElementById('progress-bar').style.width = `${(refreshSeconds / 60) * 100}%`;
                 
                 if(cachedBusData && cachedBusData.status === "success" && cachedBusData.best_bus) {
-                    // 0초 미만으로 떨어지지 않게 방어 로직 적용
                     if(cachedBusData.best_bus.seconds > 0) cachedBusData.best_bus.seconds--;
                     document.getElementById('main-time').innerText = formatMinutes(cachedBusData.best_bus.seconds);
                     
@@ -226,9 +222,9 @@
                     document.getElementById('big-timer').style.color = '#108a47';
                     
                     const listHtml = data.bus_list.map(bus => {
-                        // 🚨 수정: 261번은 파란색(blue), 1017 및 1137번은 초록색(green) 적용
-                        const colorClass = bus.bus_number.includes('261') ? 'blue' : 'green';
-                        return `<div class="bus-item"><div class="bus-info"><span class="bus-num ${colorClass}">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 거리</span></div><div class="bus-time-info"><strong class="bus-list-time-dynamic">${formatMinutes(bus.seconds)}</strong></div></div>`;
+                        // 🚨 수정: 백엔드에서 판별한 bus_color 코드를 직접 배경색(background-color)으로 주입합니다.
+                        // 1017, 1137번은 #00A080(초록), 261번은 #0068b7(파랑)이 정확히 들어갑니다.
+                        return `<div class="bus-item"><div class="bus-info"><span class="bus-num" style="background-color: ${bus.bus_color};">${bus.bus_number}</span><span class="bus-dir">${bus.station_name} 탑승</span><span class="bus-distance">${bus.distance_str} 거리</span></div><div class="bus-time-info"><strong class="bus-list-time-dynamic">${formatMinutes(bus.seconds)}</strong></div></div>`;
                     }).join('');
                     document.getElementById('bus-list-container').innerHTML = listHtml;
                 } else {
