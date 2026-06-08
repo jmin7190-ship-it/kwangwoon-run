@@ -32,7 +32,7 @@ STATION_NAMES = {"11285": "정문 앞 정류장", "11279": "광운대역 정류�
 STATION_ID_CACHE = {}
 MOCK_SCHEDULE = {}
 
-# 🚨 버스 색상 판별 함수 추가
+# 🚨 버스 색상 판별 함수
 def get_bus_color(bus_number):
     if "1017" in bus_number or "1137" in bus_number:
         return "#00A080"  # 서울 초록 버스(지선) 색상코드
@@ -116,29 +116,26 @@ def get_bus_data():
     if target_dir not in MOCK_SCHEDULE:
         MOCK_SCHEDULE[target_dir] = {}
         
-    # 🚨 수정됨: 광운대 정문과 광운대역 방면 모두 동일하게 1017, 1137, 261번 적용
     bus_nums = ["1017", "1137", "261"]
 
     for b_num in bus_nums:
         if b_num not in MOCK_SCHEDULE[target_dir]:
             MOCK_SCHEDULE[target_dir][b_num] = []
 
-        # 🚨 현실 고증 2: 도착(0초) 후 90초 동안은 리스트에서 지우지 않음 ('곧 도착'으로 정차 유지)
+        # 🚨 현실 고증: 도착(0초) 후 90초 동안은 리스트에서 지우지 않음 ('곧 도착'으로 정차 유지)
         MOCK_SCHEDULE[target_dir][b_num] = [t for t in MOCK_SCHEDULE[target_dir][b_num] if t > current_time - 90]
 
-        # 🚨 현실 고증 1: 돌발 교통체증 Jitter 발생 (20% 확률로 도착 예정 시간 10~20초 추가 지연)
-        for i in range(len(MOCK_SCHEDULE[target_dir][b_num])):
-            if MOCK_SCHEDULE[target_dir][b_num][i] > current_time: 
-                if random.random() < 0.20:
-                    MOCK_SCHEDULE[target_dir][b_num][i] += random.randint(10, 20)
+        # 🚨 수정된 부분: 돌발 교통체증(Jitter) 삭제. 새로고침해도 시간이 절대 늘어나거나 튀지 않습니다.
 
-        # 배차 충전
+        # 배차 충전 (도착 시간이 뭉치지 않도록 최대 13분으로 분산 배치)
         while len(MOCK_SCHEDULE[target_dir][b_num]) < 2:
             if MOCK_SCHEDULE[target_dir][b_num]:
                 last_arrival = max(MOCK_SCHEDULE[target_dir][b_num])
-                new_arr = last_arrival + random.randint(300, 600)
+                # 이전 차가 있고 다음 차가 올 때, 5분(300초) ~ 13분(780초) 사이 간격으로 배치
+                new_arr = last_arrival + random.randint(300, 780)
             else:
-                new_arr = current_time + random.randint(30, 240)
+                # 완전 처음 서버에서 생성될 때, 1분(60초) ~ 13분(780초) 중 무작위 배치
+                new_arr = current_time + random.randint(60, 780)
             MOCK_SCHEDULE[target_dir][b_num].append(new_arr)
 
     try:
@@ -158,7 +155,7 @@ def get_bus_data():
                             "seconds": max(0, bus_seconds), "status_type": s_type,
                             "message": s_msg, "action_txt": s_act, "priority": s_pri,
                             "path_str": f"{start_loc_name} ➔ {target_station_name}",
-                            "bus_color": get_bus_color(rtNm) # 🚨 색상 코드 추가
+                            "bus_color": get_bus_color(rtNm)
                         })
 
         if not all_buses:
@@ -168,10 +165,10 @@ def get_bus_data():
                     s_type, s_msg, s_act, s_pri = calculate_action(sec_left, distance, penalty)
                     all_buses.append({
                         "bus_number": b_num, "station_name": target_station_name, "distance_str": f"{distance}m", 
-                        "seconds": max(0, sec_left), "status_type": s_type, # 0초 미만은 모두 0초(곧 도착)로 전송
+                        "seconds": max(0, sec_left), "status_type": s_type,
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
                         "path_str": f"{start_loc_name} ➔ {target_station_name}",
-                        "bus_color": get_bus_color(b_num) # 🚨 색상 코드 추가
+                        "bus_color": get_bus_color(b_num) 
                     })
 
         if target_bus != 'all':
@@ -185,7 +182,7 @@ def get_bus_data():
                         "seconds": max(0, sec_left), "status_type": s_type,
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
                         "path_str": f"{start_loc_name} ➔ {target_station_name}",
-                        "bus_color": get_bus_color(target_bus) # 🚨 색상 코드 추가
+                        "bus_color": get_bus_color(target_bus) 
                     })
             all_buses = filtered_buses
 
