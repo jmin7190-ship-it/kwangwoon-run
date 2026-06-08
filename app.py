@@ -32,6 +32,14 @@ STATION_NAMES = {"11285": "정문 앞 정류장", "11279": "광운대역 정류�
 STATION_ID_CACHE = {}
 MOCK_SCHEDULE = {}
 
+# 🚨 버스 색상 판별 함수 추가
+def get_bus_color(bus_number):
+    if "1017" in bus_number or "1137" in bus_number:
+        return "#00A080"  # 서울 초록 버스(지선) 색상코드
+    elif "261" in bus_number:
+        return "#0068b7"  # 서울 파랑 버스(간선) 색상코드
+    return "#333333"      # 기본 색상
+
 def parse_bus_time(bus):
     try:
         bus_str = str(bus)
@@ -107,7 +115,9 @@ def get_bus_data():
     
     if target_dir not in MOCK_SCHEDULE:
         MOCK_SCHEDULE[target_dir] = {}
-    bus_nums = ["261", "1137", "163"] if target_dir == "11285" else ["163", "1144", "261"]
+        
+    # 🚨 수정됨: 광운대 정문과 광운대역 방면 모두 동일하게 1017, 1137, 261번 적용
+    bus_nums = ["1017", "1137", "261"]
 
     for b_num in bus_nums:
         if b_num not in MOCK_SCHEDULE[target_dir]:
@@ -147,7 +157,8 @@ def get_bus_data():
                             "bus_number": rtNm, "station_name": target_station_name, "distance_str": f"{distance}m", 
                             "seconds": max(0, bus_seconds), "status_type": s_type,
                             "message": s_msg, "action_txt": s_act, "priority": s_pri,
-                            "path_str": f"{start_loc_name} ➔ {target_station_name}"
+                            "path_str": f"{start_loc_name} ➔ {target_station_name}",
+                            "bus_color": get_bus_color(rtNm) # 🚨 색상 코드 추가
                         })
 
         if not all_buses:
@@ -159,7 +170,8 @@ def get_bus_data():
                         "bus_number": b_num, "station_name": target_station_name, "distance_str": f"{distance}m", 
                         "seconds": max(0, sec_left), "status_type": s_type, # 0초 미만은 모두 0초(곧 도착)로 전송
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
-                        "path_str": f"{start_loc_name} ➔ {target_station_name}"
+                        "path_str": f"{start_loc_name} ➔ {target_station_name}",
+                        "bus_color": get_bus_color(b_num) # 🚨 색상 코드 추가
                     })
 
         if target_bus != 'all':
@@ -172,7 +184,8 @@ def get_bus_data():
                         "bus_number": target_bus, "station_name": target_station_name, "distance_str": f"{distance}m", 
                         "seconds": max(0, sec_left), "status_type": s_type,
                         "message": s_msg, "action_txt": s_act, "priority": s_pri,
-                        "path_str": f"{start_loc_name} ➔ {target_station_name}"
+                        "path_str": f"{start_loc_name} ➔ {target_station_name}",
+                        "bus_color": get_bus_color(target_bus) # 🚨 색상 코드 추가
                     })
             all_buses = filtered_buses
 
